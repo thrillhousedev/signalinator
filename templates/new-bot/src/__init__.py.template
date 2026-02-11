@@ -1,0 +1,5 @@
+"""{{BOT_TITLE}} - {{BOT_DESCRIPTION}}"""
+
+from .bot import {{BOT_CLASS}}
+
+__all__ = ["{{BOT_CLASS}}"]
