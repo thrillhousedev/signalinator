@@ -1,0 +1,364 @@
+# Signalinator Monorepo - Docker Compose
+#
+# Usage:
+#   docker compose --profile taginator up -d              # Start a bot
+#   docker compose --profile all up -d                    # Start all bots
+#   docker compose run --rm taginator-daemon setup        # Register new account
+#   docker compose run --rm taginator-daemon link         # Link to existing account
+#   docker compose run --rm taginator-daemon status       # Check registration status
+
+x-signal-daemon: &signal-daemon
+  platform: linux/amd64
+  build:
+    context: .
+    dockerfile: docker/signal-daemon.Dockerfile
+  restart: unless-stopped
+  networks:
+    - signalinator
+  # Entrypoint handles: daemon mode (default), setup, link, status commands
+  healthcheck:
+    test: ["CMD", "curl", "-sf", "http://localhost:8080/api/v1/rpc", "-X", "POST", "-H", "Content-Type: application/json", "-d", "{\"jsonrpc\":\"2.0\",\"method\":\"version\",\"id\":1}"]
+    interval: 10s
+    timeout: 5s
+    retries: 10
+    start_period: 60s
+
+x-bot-common: &bot-common
+  restart: unless-stopped
+  networks:
+    - signalinator
+  env_file:
+    - .env
+
+services:
+  # ===========================================================================
+  # TAGINATOR
+  # ===========================================================================
+  taginator-daemon:
+    <<: *signal-daemon
+    profiles: [taginator, all]
+    environment:
+      - SIGNAL_PHONE_NUMBER=${TAGINATOR_PHONE}
+    volumes:
+      - ./config/taginator:/signal-cli-config
+    ports:
+      - "${TAGINATOR_DAEMON_PORT:-8081}:8080"
+
+  taginator:
+    <<: *bot-common
+    build:
+      context: .
+      dockerfile: docker/taginator.Dockerfile
+    profiles: [taginator, all]
+    depends_on:
+      taginator-daemon:
+        condition: service_healthy
+    environment:
+      - SIGNAL_PHONE_NUMBER=${TAGINATOR_PHONE}
+      - SIGNAL_DAEMON_HOST=taginator-daemon
+      - SIGNAL_DAEMON_PORT=8080
+      - DB_PATH=/data/taginator.db
+    volumes:
+      - ./data/taginator:/data
+
+  # ===========================================================================
+  # INFORMINATOR
+  # ===========================================================================
+  informinator-daemon:
+    <<: *signal-daemon
+    profiles: [informinator, all]
+    environment:
+      - SIGNAL_PHONE_NUMBER=${INFORMINATOR_PHONE}
+    volumes:
+      - ./config/informinator:/signal-cli-config
+    ports:
+      - "${INFORMINATOR_DAEMON_PORT:-8082}:8080"
+
+  informinator:
+    <<: *bot-common
+    build:
+      context: .
+      dockerfile: docker/informinator.Dockerfile
+    profiles: [informinator, all]
+    depends_on:
+      informinator-daemon:
+        condition: service_healthy
+    environment:
+      - SIGNAL_PHONE_NUMBER=${INFORMINATOR_PHONE}
+      - SIGNAL_DAEMON_HOST=informinator-daemon
+      - SIGNAL_DAEMON_PORT=8080
+      - DB_PATH=/data/informinator.db
+    volumes:
+      - ./data/informinator:/data
+
+  # ===========================================================================
+  # NEWSINATOR
+  # ===========================================================================
+  newsinator-daemon:
+    <<: *signal-daemon
+    profiles: [newsinator, all]
+    environment:
+      - SIGNAL_PHONE_NUMBER=${NEWSINATOR_PHONE}
+    volumes:
+      - ./config/newsinator:/signal-cli-config
+    ports:
+      - "${NEWSINATOR_DAEMON_PORT:-8083}:8080"
+
+  newsinator:
+    <<: *bot-common
+    build:
+      context: .
+      dockerfile: docker/newsinator.Dockerfile
+    profiles: [newsinator, all]
+    depends_on:
+      newsinator-daemon:
+        condition: service_healthy
+    environment:
+      - SIGNAL_PHONE_NUMBER=${NEWSINATOR_PHONE}
+      - SIGNAL_DAEMON_HOST=newsinator-daemon
+      - SIGNAL_DAEMON_PORT=8080
+      - DB_PATH=/data/newsinator.db
+    volumes:
+      - ./data/newsinator:/data
+
+  # ===========================================================================
+  # DECISIONATOR + LOOMIO STACK
+  # ===========================================================================
+
+  # Loomio PostgreSQL
+  loomio-db:
+    image: postgres:15
+    profiles: [decisionator, all]
+    environment:
+      POSTGRES_DB: loomio_production
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - loomio_postgres:/var/lib/postgresql/data
+    networks:
+      - signalinator
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Loomio Redis
+  loomio-redis:
+    image: redis:7-alpine
+    profiles: [decisionator, all]
+    networks:
+      - signalinator
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Loomio Web App
+  loomio:
+    build:
+      context: ../loomio-fork
+      dockerfile: Dockerfile
+    profiles: [decisionator, all]
+    depends_on:
+      loomio-db:
+        condition: service_healthy
+      loomio-redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@loomio-db/loomio_production
+      REDIS_URL: redis://loomio-redis:6379
+      RAILS_ENV: production
+      SECRET_KEY_BASE: ${LOOMIO_SECRET_KEY_BASE:-development-secret-key-change-in-production}
+      CANONICAL_HOST: localhost
+      REPLY_HOSTNAME: localhost
+      CANONICAL_PORT: 3000
+      SUPPORT_EMAIL: "support <support@localhost>"
+      SMTP_DOMAIN: localhost
+      # Auto-setup admin user
+      LOOMIO_ADMIN_EMAIL: ${LOOMIO_ADMIN_EMAIL:-admin@decisionator.local}
+      LOOMIO_ADMIN_NAME: ${LOOMIO_ADMIN_NAME:-Admin}
+      LOOMIO_ADMIN_PASSWORD: ${LOOMIO_ADMIN_PASSWORD:-}
+      LOOMIO_ADMIN_API_KEY: ${LOOMIO_API_KEY}
+    ports:
+      - "${LOOMIO_PORT:-3001}:80"
+    volumes:
+      - loomio_uploads:/loomio/public/system
+    networks:
+      - signalinator
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
+
+  # Loomio Background Worker
+  loomio-worker:
+    build:
+      context: ../loomio-fork
+      dockerfile: Dockerfile
+    profiles: [decisionator, all]
+    depends_on:
+      loomio-db:
+        condition: service_healthy
+      loomio-redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@loomio-db/loomio_production
+      REDIS_URL: redis://loomio-redis:6379
+      RAILS_ENV: production
+      SECRET_KEY_BASE: ${LOOMIO_SECRET_KEY_BASE:-development-secret-key-change-in-production}
+      TASK: worker
+    networks:
+      - signalinator
+    restart: unless-stopped
+
+  decisionator-daemon:
+    <<: *signal-daemon
+    profiles: [decisionator, all]
+    environment:
+      - SIGNAL_PHONE_NUMBER=${DECISIONATOR_PHONE}
+    volumes:
+      - ./config/decisionator:/signal-cli-config
+    ports:
+      - "${DECISIONATOR_DAEMON_PORT:-8084}:8080"
+
+  decisionator:
+    <<: *bot-common
+    build:
+      context: .
+      dockerfile: docker/decisionator.Dockerfile
+    profiles: [decisionator, all]
+    depends_on:
+      decisionator-daemon:
+        condition: service_healthy
+      loomio:
+        condition: service_healthy
+    environment:
+      - SIGNAL_PHONE_NUMBER=${DECISIONATOR_PHONE}
+      - SIGNAL_DAEMON_HOST=decisionator-daemon
+      - SIGNAL_DAEMON_PORT=8080
+      - DB_PATH=/data/decisionator.db
+      - LOOMIO_URL=http://loomio:80
+      - LOOMIO_API_KEY=${LOOMIO_API_KEY}
+    volumes:
+      - ./data/decisionator:/data
+
+  # ===========================================================================
+  # SUMMARIZINATOR
+  # ===========================================================================
+  summarizinator-daemon:
+    <<: *signal-daemon
+    profiles: [summarizinator, all]
+    environment:
+      - SIGNAL_PHONE_NUMBER=${SUMMARIZINATOR_PHONE}
+    volumes:
+      - ./config/summarizinator:/signal-cli-config
+    ports:
+      - "${SUMMARIZINATOR_DAEMON_PORT:-8085}:8080"
+
+  summarizinator:
+    <<: *bot-common
+    build:
+      context: .
+      dockerfile: docker/summarizinator.Dockerfile
+    profiles: [summarizinator, all]
+    depends_on:
+      summarizinator-daemon:
+        condition: service_healthy
+    environment:
+      - SIGNAL_PHONE_NUMBER=${SUMMARIZINATOR_PHONE}
+      - SIGNAL_DAEMON_HOST=summarizinator-daemon
+      - SIGNAL_DAEMON_PORT=8080
+      - DB_PATH=/data/summarizinator.db
+      - OLLAMA_HOST=${OLLAMA_HOST}
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
+    volumes:
+      - ./data/summarizinator:/data
+
+  # ===========================================================================
+  # INFORMATIONATOR
+  # ===========================================================================
+  informationator-daemon:
+    <<: *signal-daemon
+    profiles: [informationator, all]
+    environment:
+      - SIGNAL_PHONE_NUMBER=${INFORMATIONATOR_PHONE}
+    volumes:
+      - ./config/informationator:/signal-cli-config
+    ports:
+      - "${INFORMATIONATOR_DAEMON_PORT:-8086}:8080"
+
+  informationator:
+    <<: *bot-common
+    build:
+      context: .
+      dockerfile: docker/informationator.Dockerfile
+    profiles: [informationator, all]
+    depends_on:
+      informationator-daemon:
+        condition: service_healthy
+    environment:
+      - SIGNAL_PHONE_NUMBER=${INFORMATIONATOR_PHONE}
+      - SIGNAL_DAEMON_HOST=informationator-daemon
+      - SIGNAL_DAEMON_PORT=8080
+      - DB_PATH=/data/informationator.db
+      - CHROMADB_PATH=/data/chromadb
+      - DOCUMENTS_FOLDER=/documents
+      - OLLAMA_HOST=${OLLAMA_HOST}
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
+      - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL}
+    volumes:
+      - ./data/informationator:/data
+      - ./documents/informationator:/documents
+      - ./config/informationator/attachments:/signal-attachments:ro
+
+  # ===========================================================================
+  # CONDUCTINATOR (Bot Management)
+  # ===========================================================================
+  conductinator-daemon:
+    <<: *signal-daemon
+    profiles: [conductinator, all]
+    environment:
+      - SIGNAL_PHONE_NUMBER=${CONDUCTINATOR_PHONE}
+    volumes:
+      - ./config/conductinator:/signal-cli-config
+    ports:
+      - "${CONDUCTINATOR_DAEMON_PORT:-8087}:8080"
+
+  conductinator:
+    <<: *bot-common
+    build:
+      context: .
+      dockerfile: docker/conductinator.Dockerfile
+    profiles: [conductinator, all]
+    user: root  # Required to access Docker socket on macOS
+    depends_on:
+      conductinator-daemon:
+        condition: service_healthy
+    environment:
+      - SIGNAL_PHONE_NUMBER=${CONDUCTINATOR_PHONE}
+      - SIGNAL_DAEMON_HOST=conductinator-daemon
+      - SIGNAL_DAEMON_PORT=8080
+      - DB_PATH=/data/conductinator.db
+      - DOCKER_SOCKET=/var/run/docker.sock
+      - CONDUCTINATOR_ADMINS=${CONDUCTINATOR_ADMINS}
+      - COMPOSE_FILE=/app/docker-compose.yml
+      - COMPOSE_PROJECT_NAME=signalinator
+      - COMPOSE_PROJECT_DIR=${COMPOSE_PROJECT_DIR:-/Users/thrillhouse/Dev/Repos/signalinator}
+    volumes:
+      - ./data/conductinator:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount entire project for docker compose (paths are relative to compose file)
+      - .:/app:ro
+
+volumes:
+  loomio_postgres:
+  loomio_uploads:
+
+networks:
+  signalinator:
+    driver: bridge

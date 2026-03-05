@@ -1,0 +1,6 @@
+"""Database models and repository for {{BOT_TITLE}}."""
+
+from .models import GroupSettings
+from .repository import {{BOT_CLASS}}Repository
+
+__all__ = ["GroupSettings", "{{BOT_CLASS}}Repository"]

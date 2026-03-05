@@ -1,0 +1,85 @@
+"""{{BOT_TITLE}} bot implementation."""
+
+from typing import Dict, Optional, Callable
+
+from signalinator_core import (
+    SignalinatorBot,
+    BotCommand,
+    CommandContext,
+    MessageContext,
+    get_logger,
+    create_encrypted_engine,
+)
+
+from .database import {{BOT_CLASS}}Repository
+
+logger = get_logger(__name__)
+
+
+class {{BOT_CLASS}}(SignalinatorBot):
+    """{{BOT_TITLE}} - {{BOT_DESCRIPTION}}
+
+    Commands:
+    - /status: Show bot status
+    - /help: Show available commands
+    """
+
+    def __init__(
+        self,
+        phone_number: str,
+        db_path: str,
+        daemon_host: str = None,
+        daemon_port: int = None,
+        auto_accept_invites: bool = True,
+    ):
+        super().__init__(
+            phone_number=phone_number,
+            daemon_host=daemon_host,
+            daemon_port=daemon_port,
+            auto_accept_invites=auto_accept_invites,
+        )
+
+        self.db_path = db_path
+        engine = create_encrypted_engine(db_path)
+        self.repo = {{BOT_CLASS}}Repository(engine)
+
+    @property
+    def bot_name(self) -> str:
+        return "{{BOT_TITLE}}"
+
+    def get_commands(self) -> Dict[str, BotCommand]:
+        return {
+            "/status": BotCommand(
+                name="/status",
+                description="Show bot status",
+                handler=self._handle_status,
+            ),
+            # Add your commands here
+        }
+
+    def on_startup(self) -> None:
+        """Called when bot starts."""
+        logger.info("{{BOT_TITLE}} started")
+
+    def on_shutdown(self) -> None:
+        """Called when bot stops."""
+        pass
+
+    def on_group_joined(self, group_id: str, group_name: str) -> Optional[str]:
+        """Called when bot joins a group."""
+        self.repo.create_group(group_id, group_name)
+        return "Hi! I'm {{BOT_TITLE}}. Use /help for available commands."
+
+    def handle_group_message(
+        self,
+        context: MessageContext,
+        send_response: Callable[[str], bool],
+    ) -> Optional[str]:
+        """Handle non-command group messages."""
+        return None  # Don't respond to regular messages
+
+    # ==================== Command Handlers ====================
+
+    def _handle_status(self, context: CommandContext) -> str:
+        """Handle /status command."""
+        return "{{BOT_TITLE}} is running!"
