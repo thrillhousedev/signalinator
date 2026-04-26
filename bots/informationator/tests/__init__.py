@@ -1,0 +1,1 @@
+"""Informationator tests."""
