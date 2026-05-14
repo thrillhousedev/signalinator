@@ -1,0 +1,31 @@
+[project]
+name = "signalinator-core"
+version = "1.0.0"
+description = "Core library for Signalinator Signal bots"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1.0",
+    "colorlog>=6.8.0",
+    "python-dotenv>=1.0.0",
+    "sqlalchemy>=2.0.0",
+    "requests>=2.31.0",
+    "sseclient-py>=1.8.0",
+    "python-dateutil>=2.8.0",
+    "pytz>=2024.1",
+]
+
+[project.optional-dependencies]
+encryption = ["pysqlcipher3>=1.2.0"]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-mock>=3.12.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/signalinator_core"]

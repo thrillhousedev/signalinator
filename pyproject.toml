@@ -1,0 +1,30 @@
+# Signalinator Monorepo
+# UV workspace configuration for Signal bot framework
+
+[project]
+name = "signalinator"
+version = "1.0.0"
+description = "Signal bot framework and collection"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = ["packages/*", "bots/*"]
+
+[tool.uv.sources]
+signalinator-core = { workspace = true }
+
+[tool.pytest.ini_options]
+# Note: Run bot tests separately due to conftest.py naming collisions in monorepo
+# pytest packages/signalinator-core/tests/  (or just `pytest` with defaults)
+# pytest bots/taginator/tests/
+# pytest bots/conductinator/tests/
+testpaths = ["packages/signalinator-core/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning:sqlalchemy.*:",
+    "ignore::DeprecationWarning:datetime.*:",
+]

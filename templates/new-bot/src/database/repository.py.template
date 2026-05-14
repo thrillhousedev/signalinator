@@ -1,0 +1,57 @@
+"""Repository for {{BOT_TITLE}} database operations."""
+
+from datetime import datetime, timezone
+from typing import Optional
+from contextlib import contextmanager
+
+from sqlalchemy.orm import sessionmaker, Session
+
+from signalinator_core import get_logger
+
+from .models import Base, GroupSettings
+
+logger = get_logger(__name__)
+
+
+class {{BOT_CLASS}}Repository:
+    """Repository for {{BOT_TITLE}} database operations."""
+
+    def __init__(self, engine):
+        self.engine = engine
+        Base.metadata.create_all(engine)
+        self.Session = sessionmaker(bind=engine)
+
+    @contextmanager
+    def get_session(self) -> Session:
+        session = self.Session()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def create_group(self, group_id: str, group_name: str = None) -> GroupSettings:
+        """Create or update a group."""
+        with self.get_session() as session:
+            settings = session.query(GroupSettings).filter_by(group_id=group_id).first()
+            if settings:
+                if group_name:
+                    settings.group_name = group_name
+                settings.updated_at = datetime.now(timezone.utc)
+            else:
+                settings = GroupSettings(group_id=group_id, group_name=group_name)
+                session.add(settings)
+            session.flush()
+            session.expunge(settings)
+            return settings
+
+    def get_group_settings(self, group_id: str) -> Optional[GroupSettings]:
+        """Get settings for a group."""
+        with self.get_session() as session:
+            settings = session.query(GroupSettings).filter_by(group_id=group_id).first()
+            if settings:
+                session.expunge(settings)
+            return settings
